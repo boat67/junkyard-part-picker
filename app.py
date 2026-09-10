@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import urllib.parse
 import requests
 import streamlit as st
@@ -21,6 +22,25 @@ if secret_key:
     st.sidebar.success("✅ Gemini API Key loaded automatically!")
 else:
     gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
+
+# --- ROBUST GEMINI API CALLER WITH AUTO-RETRIES ---
+def call_gemini_with_retry(url, payload, max_retries=3):
+    """Automatically retries the request if Gemini's servers throw a 503 high demand error."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, json=payload, timeout=45)
+            if response.status_code == 200:
+                return response
+            elif response.status_code == 503 and attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))  # Wait longer each retry
+                continue
+            else:
+                return response
+        except requests.exceptions.Timeout:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2)
+    return None
 
 # --- FREE NHTSA VIN DECODER ENGINE ---
 def decode_vin(vin):
@@ -44,14 +64,13 @@ def decode_vin(vin):
     return None, None, None, None
 
 # --- TAB LAYOUT FOR INPUT MODES ---
-tab1, tab2 = tab1, tab2 = st.tabs(["📸 Scan Facebook Yard Photo", "🔤 Manual Vehicle / VIN Lookup"])
+tab1, tab2 = st.tabs(["📸 Scan Facebook Yard Photo", "🔤 Manual Vehicle / VIN Lookup"])
 
 # --- TAB 1: FACEBOOK PHOTO SCANNER ---
 with tab1:
     st.subheader("Analyze New Arrival Yard Post")
     st.write("Take a screenshot of the Facebook yard post, copy it to your clipboard (`PrtScn` or `Win+Shift+S`), click the button below, and press `Ctrl+V`!")
     
-    # Paste button component
     paste_result = paste_image_button(
         label="📋 Click here & Press Ctrl+V to Paste Image",
         background_color="#FF4B4B",
@@ -61,7 +80,7 @@ with tab1:
     
     st.markdown("---")
     st.markdown("*Or upload a file the traditional way:*")
-    uploaded_file = st.file_uploader("Upload Yard Photo Grid (PNG, JPG)", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("Upload Yard Photo Grid (PNG, JPG)", type=["jpg", "jpeg", "png"], key="yard_uploader")
     
     image = None
     if paste_result.image_data is not None:
@@ -77,10 +96,9 @@ with tab1:
             if not gemini_api_key:
                 st.error("Please enter your Google Gemini API Key in the sidebar.")
             else:
-                with st.spinner("Analyzing vehicles in the photo..."):
+                with st.spinner("Analyzing vehicles in the photo (auto-retrying if servers are busy)..."):
                     import io
                     buffered = io.BytesIO()
-                    # Convert to RGB if needed (e.g. RGBA pngs)
                     if image.mode in ("RGBA", "P"):
                         image = image.convert("RGB")
                     image.save(buffered, format="JPEG")
@@ -119,9 +137,10 @@ with tab1:
                     }
                     
                     try:
-                        response = requests.post(url, json=payload, timeout=45)
-                        if response.status_code != 200:
-                            st.error(f"API Error ({response.status_code}): {response.text}")
+                        response = call_gemini_with_retry(url, payload)
+                        if response is None or response.status_code != 200:
+                            err_msg = response.text if response else "No response from server"
+                            st.error(f"API Error: {err_msg}")
                         else:
                             res_json = response.json()
                             raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -166,7 +185,7 @@ with tab1:
 # --- TAB 2: MANUAL / VIN LOOKUP ---
 with tab2:
     st.subheader("Vehicle Lookup")
-    vin_input = st.text_input("Paste 17-Digit VIN (Optional)", value="", max_chars=17)
+    vin_input = st.text_input("Paste 17-Digit VIN (Optional)", value="", max_chars=17, key="vin_box")
 
     decoded_year, decoded_make, decoded_model, decoded_trim = "", "", "", ""
     if len(vin_input.strip()) == 17:
@@ -193,7 +212,7 @@ with tab2:
             st.error("Please enter your Google Gemini API Key in the sidebar.")
         else:
             try:
-                with st.spinner(f"Analyzing {year} {make} {model}..."):
+                with st.spinner(f"Analyzing {year} {make} {model} (auto-retrying if busy)..."):
                     prompt = f"""
                     You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
                     When given a vehicle ({year} {make} {model} {trim}), identify 20 top candidate high-value OEM parts.
@@ -218,10 +237,11 @@ with tab2:
                         }
                     }
                     
-                    response = requests.post(url, json=payload, timeout=30)
+                    response = call_gemini_with_retry(url, payload)
                     
-                    if response.status_code != 200:
-                        st.error(f"API Error ({response.status_code}): {response.text}")
+                    if response is None or response.status_code != 200:
+                        err_msg = response.text if response else "No response from server"
+                        st.error(f"API Error: {err_msg}")
                     else:
                         res_json = response.json()
                         raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()

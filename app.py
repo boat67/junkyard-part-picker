@@ -124,16 +124,16 @@ if submit:
         st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
-            # Set explicit API options to prevent hanging connection calls
+            # Extended HTTP timeout to 60s so fast API calls won't get cut off prematurely
             client = genai.Client(
                 api_key=gemini_api_key,
-                http_options=types.HttpOptions(timeout=15.0)
+                http_options=types.HttpOptions(timeout=60.0)
             )
             
             with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
                 prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                When given a vehicle ({year} {make} {model} {trim}), identify the top 15 candidate high-value OEM parts.
+                When given a vehicle ({year} {make} {model} {trim}), identify 10 top candidate high-value OEM parts.
 
                 Return strictly raw JSON format matching this array schema:
                 [
@@ -149,7 +149,6 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Standard model string supported across all API key tiers
                 response = client.models.generate_content(
                     model="gemini-1.5-flash",
                     contents=prompt
@@ -157,7 +156,6 @@ if submit:
 
                 raw_text = response.text.strip()
                 
-                # Cleanup potential code block wrappers
                 if "```" in raw_text:
                     raw_text = raw_text.split("```")[1]
                     if raw_text.startswith("json"):

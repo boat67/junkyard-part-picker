@@ -11,7 +11,7 @@ from streamlit_paste_button import paste_image_button
 # Page Config
 st.set_page_config(page_title="Junkyard Part Picker AI", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
-st.write("Upload or paste a yard arrival photo or enter a vehicle/VIN to identify high-profit parts for eBay flipping.")
+st.write("Upload or paste a yard arrival photo or enter a vehicle/VIN to identify high-profit parts for eBay shipping or local cash flips.")
 
 # --- AUTOMATIC API KEY LOGIC ---
 secret_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -32,7 +32,7 @@ def call_gemini_with_retry(url, payload, max_retries=3):
             if response.status_code == 200:
                 return response
             elif response.status_code == 503 and attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))  # Wait longer each retry
+                time.sleep(2 * (attempt + 1))
                 continue
             else:
                 return response
@@ -92,11 +92,11 @@ with tab1:
     if image is not None:
         st.image(image, caption="Active Yard Post Image", use_container_width=True)
         
-        if st.button("Scan Vehicles & Find Parts"):
+        if st.button("Scan Vehicles & Find High-Profit Parts"):
             if not gemini_api_key:
                 st.error("Please enter your Google Gemini API Key in the sidebar.")
             else:
-                with st.spinner("Analyzing vehicles in the photo (auto-retrying if servers are busy)..."):
+                with st.spinner("Analyzing vehicles and identifying high-margin parts..."):
                     import io
                     buffered = io.BytesIO()
                     if image.mode in ("RGBA", "P"):
@@ -106,19 +106,20 @@ with tab1:
                     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
                     prompt = """
-                    You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles.
-                    Identify each distinct vehicle visible (Year, Make, Model, Trim if visible). For each vehicle, 
-                    list its top 5 highest-value, easiest-to-pull OEM parts to flip on eBay.
+                    You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles. 
+                    Identify each distinct vehicle visible. For each vehicle, list its top 5 highest-margin parts to flip.
+                    Prefer small-to-medium parts that are cheap to ship, but *do* include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins and are worth pulling for shipping or local cash sale. 
+                    Include a brief note specifying if it's best for 'Shipping' or 'Local Pickup Only'.
 
                     Return strictly raw JSON format matching this array schema:
                     [
                       {
                         "vehicle_name": "2007-2013 GMC Sierra",
-                        "part_name": "Tail Light Assembly",
-                        "est_ebay_price": 85,
+                        "part_name": "OEM Front Grille Assembly",
+                        "est_ebay_price": 150,
                         "difficulty": "Easy (5 mins)",
-                        "tools_needed": "10mm socket",
-                        "notes": "High demand, check for cracks."
+                        "tools_needed": "10mm socket, clips tool",
+                        "notes": "Large item, highly sought after. Best for Local Pickup or careful box shipping."
                       }
                     ]
                     """
@@ -205,26 +206,27 @@ with tab2:
         with col4:
             trim = st.text_input("Trim / Engine", value=decoded_trim if decoded_trim else "SE")
         
-        submit = st.form_submit_button("Find High-Value Parts")
+        submit = st.form_submit_button("Find High-Profit Parts")
 
     if submit:
         if not gemini_api_key:
             st.error("Please enter your Google Gemini API Key in the sidebar.")
         else:
             try:
-                with st.spinner(f"Analyzing {year} {make} {model} (auto-retrying if busy)..."):
+                with st.spinner(f"Analyzing {year} {make} {model} for high-margin targets..."):
                     prompt = f"""
-                    You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                    When given a vehicle ({year} {make} {model} {trim}), identify 20 top candidate high-value OEM parts.
+                    You are an expert auto parts liquidator specializing in self-serve junkyard flipping.
+                    When given a vehicle ({year} {make} {model} {trim}), identify 15 top candidate parts balancing ease of shipping with high-value larger items (like grilles, mirrors, assemblies) if the profit margin makes them worth pulling.
+                    Include a brief note on whether the item is great for shipping or better for local cash sale.
 
                     Return strictly raw JSON format matching this array schema:
                     [
                       {{
                         "part_name": "Part Name",
-                        "est_ebay_price": 120,
+                        "est_ebay_price": 110,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, trim tool",
-                        "notes": "Common failure point; high resale demand."
+                        "notes": "High demand, great margin. Good for shipping or local sale."
                       }}
                     ]
                     """
@@ -253,8 +255,8 @@ with tab2:
                                 
                         parts_data = json.loads(raw_text.strip())
 
-                        st.subheader(f"Top 20 Parts to Pull for {year} {make} {model}")
-                        st.caption("Click the quick links below each part to instantly check local yard pricing or eBay sold comps.")
+                        st.subheader(f"Top High-Margin Parts to Pull for {year} {make} {model}")
+                        st.caption("Includes high-value shippable items and profitable larger components (like grilles or assemblies).")
 
                         for i, item in enumerate(parts_data, 1):
                             p_name = item.get("part_name", "Part")

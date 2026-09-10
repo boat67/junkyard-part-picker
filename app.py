@@ -5,11 +5,12 @@ import requests
 import streamlit as st
 import pandas as pd
 from PIL import Image
+from streamlit_paste_button import paste_image_button
 
 # Page Config
 st.set_page_config(page_title="Junkyard Part Picker AI", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
-st.write("Upload a yard arrival photo or enter a vehicle/VIN to identify high-profit parts for eBay flipping.")
+st.write("Upload or paste a yard arrival photo or enter a vehicle/VIN to identify high-profit parts for eBay flipping.")
 
 # --- AUTOMATIC API KEY LOGIC ---
 secret_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -43,18 +44,34 @@ def decode_vin(vin):
     return None, None, None, None
 
 # --- TAB LAYOUT FOR INPUT MODES ---
-tab1, tab2 = st.tabs(["📸 Scan Facebook Yard Photo", "🔤 Manual Vehicle / VIN Lookup"])
+tab1, tab2 = tab1, tab2 = st.tabs(["📸 Scan Facebook Yard Photo", "🔤 Manual Vehicle / VIN Lookup"])
 
 # --- TAB 1: FACEBOOK PHOTO SCANNER ---
 with tab1:
     st.subheader("Analyze New Arrival Yard Post")
-    st.write("Screenshot or save the yard's Facebook photo grid and drop it here to automatically identify all vehicles and their best parts.")
+    st.write("Take a screenshot of the Facebook yard post, copy it to your clipboard (`PrtScn` or `Win+Shift+S`), click the button below, and press `Ctrl+V`!")
     
+    # Paste button component
+    paste_result = paste_image_button(
+        label="📋 Click here & Press Ctrl+V to Paste Image",
+        background_color="#FF4B4B",
+        hover_background_color="#FF2B2B",
+        key="clipboard_paste_btn"
+    )
+    
+    st.markdown("---")
+    st.markdown("*Or upload a file the traditional way:*")
     uploaded_file = st.file_uploader("Upload Yard Photo Grid (PNG, JPG)", type=["jpg", "jpeg", "png"])
     
-    if uploaded_file is not None:
+    image = None
+    if paste_result.image_data is not None:
+        image = paste_result.image_data
+        st.success("✅ Image pasted successfully from clipboard!")
+    elif uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Yard Post", use_container_width=True)
+        
+    if image is not None:
+        st.image(image, caption="Active Yard Post Image", use_container_width=True)
         
         if st.button("Scan Vehicles & Find Parts"):
             if not gemini_api_key:
@@ -63,6 +80,9 @@ with tab1:
                 with st.spinner("Analyzing vehicles in the photo..."):
                     import io
                     buffered = io.BytesIO()
+                    # Convert to RGB if needed (e.g. RGBA pngs)
+                    if image.mode in ("RGBA", "P"):
+                        image = image.convert("RGB")
                     image.save(buffered, format="JPEG")
                     import base64
                     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -85,7 +105,6 @@ with tab1:
                     ]
                     """
 
-                    # Updated to gemini-3.5-flash
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{
@@ -191,7 +210,6 @@ with tab2:
                     ]
                     """
 
-                    # Updated to gemini-3.5-flash
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{"parts": [{"text": prompt}]}],

@@ -145,9 +145,9 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Enforce JSON output mode directly in SDK settings
+                # Using the dynamic alias so Google auto-routes to your active tier
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-flash-latest",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"

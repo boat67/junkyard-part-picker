@@ -2,7 +2,7 @@ import os
 import json
 import streamlit as st
 import pandas as pd
-from openai import OpenAI
+from google import genai
 
 # Page Config
 st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
@@ -11,11 +11,9 @@ st.write("Enter a vehicle to see the top high-profit, easy-to-pull parts for eBa
 
 # Sidebar for API Configuration
 st.sidebar.header("Settings")
-openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
 
 # --- MOCK EBAY DATA ENGINE ---
-# This function simulates eBay API pricing while your Developer Account is pending approval.
-# Once approved, you will replace this function with live calls to eBay's Browse API.
 def get_mock_ebay_pricing(part_name, year, make, model):
     """Simulates real-time eBay sold prices and demand statistics."""
     return {
@@ -40,25 +38,25 @@ with st.form("vehicle_form"):
     submit = st.form_submit_button("Find High-Value Parts")
 
 if submit:
-    if not openai_api_key:
-        st.error("Please enter your OpenAI API Key in the sidebar to run the analysis.")
+    if not gemini_api_key:
+        st.error("Please enter your Google Gemini API Key in the sidebar to run the analysis.")
     else:
         try:
-            client = OpenAI(api_key=openai_api_key)
+            client = genai.Client(api_key=gemini_api_key)
             
             with st.spinner("Analyzing platform architecture and identifying high-margin parts..."):
-                system_prompt = """
+                prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                When given a vehicle (Year, Make, Model, Trim), identify the top 10 candidate high-value OEM parts.
+                When given a vehicle ({year} {make} {model} {trim}), identify the top 10 candidate high-value OEM parts.
 
                 Prioritize:
                 1. High Profit Density: Lightweight/small relative to sell price (low shipping).
                 2. Known High-Failure / High-Demand Parts: Modules (ECM, TCM, BCM), Climate Control Knobs, OEM Amps, Window Switches, Tail Lights, Cup Holders, Overhead Consoles, Instrument Clusters.
                 3. Ease of Removal: Hand tool removal vs. heavy teardown.
 
-                Return strictly raw JSON format (no markdown code blocks, no ```json formatting) matching this array schema:
+                Return strictly raw JSON format matching this array schema without markdown wrappers:
                 [
-                  {
+                  {{
                     "part_name": "Part Name",
                     "est_yard_cost": 15,
                     "est_ebay_price": 120,
@@ -66,24 +64,17 @@ if submit:
                     "difficulty": "Easy (5 mins)",
                     "tools_needed": "10mm socket, trim tool",
                     "notes": "Common failure point; high resale demand."
-                  }
+                  }}
                 ]
                 """
 
-                user_prompt = f"Identify top 10 eBay parts to pull for: {year} {make} {model} {trim}"
-
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.2
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt
                 )
 
                 # Parse JSON output
-                raw_text = response.choices[0].message.content.strip()
-                # Clean up formatting if model adds code fences
+                raw_text = response.text.strip()
                 if raw_text.startswith("```"):
                     raw_text = raw_text.split("```")[1]
                     if raw_text.startswith("json"):
@@ -101,10 +92,7 @@ if submit:
 
                 st.subheader(f"Top 10 Parts to Pull: {year} {make} {model}")
                 
-                # Convert to DataFrame for a clean visual table
                 df = pd.DataFrame(parts_data)
-                
-                # Display clean table
                 display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Net Profit ($)", "difficulty", "tools_needed", "notes"]
                 st.dataframe(df[display_cols], use_container_width=True)
 

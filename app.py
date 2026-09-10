@@ -4,6 +4,7 @@ import requests
 import streamlit as st
 import pandas as pd
 from google import genai
+from google.genai import types
 
 # Page Config
 st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
@@ -130,7 +131,7 @@ if submit:
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
                 When given a vehicle ({year} {make} {model} {trim}), identify the top 15 candidate high-value OEM parts.
 
-                Return strictly raw JSON format matching this array schema without markdown wrappers:
+                Return strictly raw JSON format matching this array schema:
                 [
                   {{
                     "part_name": "Part Name",
@@ -144,18 +145,17 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
+                # Enforce JSON output mode directly in SDK settings
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=prompt
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
                 )
 
                 raw_text = response.text.strip()
-                if raw_text.startswith("```"):
-                    raw_text = raw_text.split("```")[1]
-                    if raw_text.startswith("json"):
-                        raw_text = raw_text[4:]
-                
-                parts_data = json.loads(raw_text.strip())
+                parts_data = json.loads(raw_text)
 
                 for item in parts_data:
                     cat = item.get("category_key", "default")

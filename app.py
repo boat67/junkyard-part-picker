@@ -8,7 +8,7 @@ from google import genai
 # Page Config
 st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
-st.write("Enter a vehicle or paste a VIN to see the top high-profit, easy-to-pull parts for eBay flipping.")
+st.write("Enter a vehicle or paste a VIN to see high-profit, easy-to-pull parts for eBay flipping.")
 
 # --- AUTOMATIC API KEY LOGIC ---
 secret_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -88,11 +88,11 @@ if submit:
             with st.spinner("Analyzing platform architecture and identifying high-margin parts..."):
                 prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                When given a vehicle ({year} {make} {model} {trim}), identify the top 10 candidate high-value OEM parts.
+                When given a vehicle ({year} {make} {model} {trim}), identify the top 20 candidate high-value OEM parts.
 
                 Prioritize:
                 1. High Profit Density: Lightweight/small relative to sell price (low shipping).
-                2. Known High-Failure / High-Demand Parts: Modules (ECM, TCM, BCM), Climate Control Knobs, OEM Amps, Window Switches, Tail Lights, Cup Holders, Overhead Consoles, Instrument Clusters.
+                2. Known High-Failure / High-Demand Parts: Modules (ECM, TCM, BCM), Climate Control Knobs, OEM Amps, Window Switches, Tail Lights, Cup Holders, Overhead Consoles, Instrument Clusters, Door Lock Actuators, Mass Air Flow Sensors, Throttle Bodies.
                 3. Ease of Removal: Hand tool removal vs. heavy teardown.
 
                 Return strictly raw JSON format matching this array schema without markdown wrappers:
@@ -131,7 +131,7 @@ if submit:
                     item["Yard Cost ($)"] = f"${item['est_yard_cost']}"
                     item["Net Profit ($)"] = f"${item['est_net_profit']}"
 
-                st.subheader(f"Top 10 Parts to Pull: {year} {make} {model}")
+                st.subheader(f"Top 20 Parts to Pull: {year} {make} {model}")
                 
                 df = pd.DataFrame(parts_data)
                 display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Net Profit ($)", "difficulty", "tools_needed", "notes"]

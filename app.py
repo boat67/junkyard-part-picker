@@ -125,7 +125,7 @@ if submit:
             with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
                 prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                When given a vehicle ({year} {make} {model} {trim}), identify 10 top candidate high-value OEM parts.
+                When given a vehicle ({year} {make} {model} {trim}), identify 20 top candidate high-value OEM parts.
 
                 Return strictly raw JSON format matching this array schema:
                 [
@@ -141,7 +141,6 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Using stable gemini-3.5-flash endpoint
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}],

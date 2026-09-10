@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 
 # Page Config
-st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
+st.set_page_config(page_title="Junkyard Part Picker AI", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
 st.write("Enter a vehicle or paste a VIN to see high-profit, easy-to-pull parts for eBay flipping.")
 
@@ -18,57 +18,6 @@ if secret_key:
     st.sidebar.success("✅ Gemini API Key loaded automatically!")
 else:
     gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
-
-# --- LOCAL MICHIGAN YARD PRICING TABLES ---
-YARD_PRICING = {
-    "pontiac": {
-        "name": "U-Pull & Save (Pontiac, MI)",
-        "prices": {
-            "apim": 31.49,
-            "blind_spot": 20.99,
-            "amp": 12.99,
-            "bcm": 31.49,
-            "pcm": 31.49,
-            "tail_light": 22.99,
-            "master_switch": 11.99,
-            "hvac_panel": 20.99,
-            "cluster": 26.49,
-            "abs_module": 31.49,
-            "radio_nav": 31.49,
-            "default": 20.00
-        }
-    },
-    "sterling_heights": {
-        "name": "US Auto Supply (Sterling Heights, MI)",
-        "prices": {
-            "apim": 25.00,
-            "blind_spot": 20.00,
-            "amp": 20.00,
-            "bcm": 25.00,
-            "pcm": 25.00,
-            "tail_light": 20.00,
-            "master_switch": 10.00,
-            "hvac_panel": 15.00,
-            "cluster": 25.00,
-            "abs_module": 20.00,
-            "radio_nav": 35.00,
-            "default": 20.00
-        }
-    }
-}
-
-selected_yard = st.sidebar.selectbox(
-    "Select Local Yard:",
-    options=["pontiac", "sterling_heights"],
-    format_func=lambda x: YARD_PRICING[x]["name"]
-)
-
-def calculate_local_yard_cost(part_category, yard_key):
-    """Calculates exact yard cost including MI 6% sales tax."""
-    yard = YARD_PRICING.get(yard_key, YARD_PRICING["pontiac"])
-    base_price = yard["prices"].get(part_category, yard["prices"]["default"])
-    tax = base_price * 0.06
-    return round(base_price + tax, 2)
 
 # --- FREE NHTSA VIN DECODER ENGINE ---
 def decode_vin(vin):
@@ -122,7 +71,7 @@ if submit:
         st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
-            with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
+            with st.spinner(f"Analyzing {year} {make} {model} for top eBay parts..."):
                 prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
                 When given a vehicle ({year} {make} {model} {trim}), identify 20 top candidate high-value OEM parts.
@@ -131,14 +80,12 @@ if submit:
                 [
                   {{
                     "part_name": "Part Name",
-                    "category_key": "apim", 
                     "est_ebay_price": 120,
                     "difficulty": "Easy (5 mins)",
                     "tools_needed": "10mm socket, trim tool",
                     "notes": "Common failure point; high resale demand."
                   }}
                 ]
-                Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
@@ -165,23 +112,13 @@ if submit:
                     parts_data = json.loads(raw_text.strip())
 
                     for item in parts_data:
-                        cat = item.get("category_key", "default")
-                        yard_cost = calculate_local_yard_cost(cat, selected_yard)
                         avg_sold = float(item.get("est_ebay_price", 75))
-                        
-                        ebay_fee = (avg_sold * 0.1325) + 0.30
-                        est_shipping = 12.00
-                        net_profit = round(avg_sold - yard_cost - ebay_fee - est_shipping, 2)
+                        item["Est. eBay Price"] = f"${avg_sold:.2f}"
 
-                        item["Yard Cost ($)"] = f"${yard_cost:.2f}"
-                        item["Avg Sold Price ($)"] = f"${avg_sold:.2f}"
-                        item["Est. Net Profit ($)"] = f"${net_profit:.2f}"
-
-                    st.subheader(f"Top Pulls for {year} {make} {model}")
-                    st.caption(f"Yard costs based on exact board rates at **{YARD_PRICING[selected_yard]['name']}** (includes 6% MI Sales Tax).")
+                    st.subheader(f"Top 20 Parts to Pull for {year} {make} {model}")
 
                     df = pd.DataFrame(parts_data)
-                    display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Est. Net Profit ($)", "difficulty", "tools_needed", "notes"]
+                    display_cols = ["part_name", "Est. eBay Price", "difficulty", "tools_needed", "notes"]
                     st.dataframe(df[display_cols], use_container_width=True)
 
         except Exception as e:

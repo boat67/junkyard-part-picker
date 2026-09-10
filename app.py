@@ -1,141 +1,230 @@
 import os
+import re
 import json
 import requests
 import streamlit as st
-import pandas as pd
-from google import genai
+import google.generativeai as genai
 
-# Page Config
-st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
-st.title("🚗 Junkyard Part Picker AI")
-st.write("Enter a vehicle or paste a VIN to see high-profit, easy-to-pull parts for eBay flipping.")
+# ------------------------------------------------------------------------------
+# 1. SETUP & CONFIGURATION
+# ------------------------------------------------------------------------------
+st.set_page_config(
+    page_title="YardFlip - Junkyard Part Evaluator",
+    page_icon="🚗",
+    layout="wide"
+)
 
-# --- AUTOMATIC API KEY LOGIC ---
-secret_key = st.secrets.get("GEMINI_API_KEY", "")
+# API Keys (Set via Streamlit Secrets or Environment Variables)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+EBAY_APP_ID = os.getenv("EBAY_APP_ID")  # Production AppID for eBay Finding API
 
-st.sidebar.header("Settings")
-if secret_key:
-    gemini_api_key = secret_key
-    st.sidebar.success("✅ Gemini API Key loaded automatically!")
-else:
-    gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-# --- FREE NHTSA VIN DECODER ENGINE ---
-def decode_vin(vin):
-    """Decodes a 17-digit VIN using the free public NHTSA API."""
-    url = f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json"
-    try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json().get("Results", [])[0]
-            year = data.get("ModelYear", "")
-            make = data.get("Make", "")
-            model = data.get("Model", "")
-            trim = data.get("Trim", "") or data.get("DisplacementL", "")
-            if trim and "L" in str(trim) and not str(trim).endswith("L"):
-                trim = f"{trim}L"
-            
-            if year and make and model:
-                return year, make, model, trim
-    except Exception:
-        pass
-    return None, None, None, None
+# ------------------------------------------------------------------------------
+# 2. LOCAL MICHIGAN YARD PRICING TABLES (Pontiac & Sterling Heights)
+# ------------------------------------------------------------------------------
+YARD_PRICING = {
+    "pontiac": {
+        "name": "U-Pull & Save (Pontiac, MI)",
+        "env_fee": 3.00,  # Gate / Environmental fee estimate
+        "prices": {
+            "apim": 31.49,
+            "blind_spot": 20.99,
+            "amp": 12.99,
+            "bcm": 31.49,
+            "pcm": 31.49,
+            "tail_light": 22.99,
+            "master_switch": 11.99,
+            "hvac_panel": 20.99,
+            "cluster": 26.49,
+            "abs_module": 31.49,
+            "radio_nav": 31.49,
+            "default": 20.00
+        }
+    },
+    "sterling_heights": {
+        "name": "US Auto Supply (Sterling Heights, MI)",
+        "env_fee": 3.00,
+        "prices": {
+            "apim": 25.00,
+            "blind_spot": 20.00,
+            "amp": 20.00,
+            "bcm": 25.00,
+            "pcm": 25.00,
+            "tail_light": 20.00,
+            "master_switch": 10.00,
+            "hvac_panel": 15.00,
+            "cluster": 25.00,
+            "abs_module": 20.00,
+            "radio_nav": 35.00,
+            "default": 20.00
+        }
+    }
+}
 
-# --- MOCK EBAY DATA ENGINE ---
-def get_mock_ebay_pricing(part_name, year, make, model):
-    """Simulates real-time eBay sold prices and demand statistics."""
-    return {
-        "avg_sold_price": 75.00,
-        "sell_through_rate": "High (85%)",
-        "active_listings": 12,
-        "sold_last_90_days": 45
+def calculate_local_yard_cost(part_category, yard_key):
+    """Calculates exact yard cost including MI 6% sales tax."""
+    yard = YARD_PRICING.get(yard_key, YARD_PRICING["pontiac"])
+    base_price = yard["prices"].get(part_category, yard["prices"]["default"])
+    
+    # Apply 6% Michigan Sales Tax
+    tax = base_price * 0.06
+    total_cost = round(base_price + tax, 2)
+    return total_cost, base_price
+
+# ------------------------------------------------------------------------------
+# 3. REAL-TIME EBAY MARKET DATA FETCHING
+# ------------------------------------------------------------------------------
+def fetch_ebay_sold_data(query_term):
+    """
+    Fetches real completed/sold listings from eBay Finding API.
+    Fallback: returns calculated estimate if API key is not active.
+    """
+    if not EBAY_APP_ID:
+        # Fallback simulation if no active eBay production token present
+        return None
+
+    endpoint = "https://svcs.ebay.com/services/search/FindingService/v1"
+    headers = {
+        "X-EBAY-SOA-OPERATION-NAME": "findCompletedItems",
+        "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID,
+        "X-EBAY-SOA-RESPONSE-DATA-FORMAT": "JSON",
+    }
+    params = {
+        "keywords": query_term,
+        "itemFilter(0).name": "SoldItemsOnly",
+        "itemFilter(0).value": "true",
+        "itemFilter(1).name": "Condition",
+        "itemFilter(1).value": "3000",  # Used Condition
+        "paginationInput.entriesPerPage": "15"
     }
 
-# --- UI INPUT FORM ---
-st.subheader("Vehicle Lookup")
-vin_input = st.text_input("Paste 17-Digit VIN (Optional)", value="", max_chars=17, help="Paste a VIN to auto-fill vehicle details.")
+    try:
+        res = requests.get(endpoint, headers=headers, params=params, timeout=5)
+        data = res.json()
+        items = data.get("findCompletedItemsResponse", [{}])[0].get("searchResult", [{}])[0].get("item", [])
+        
+        prices = []
+        for item in items:
+            price = float(item["sellingStatus"][0]["currentPrice"][0]["__value__"])
+            prices.append(price)
 
-# Auto-decode VIN if provided
-decoded_year, decoded_make, decoded_model, decoded_trim = "", "", "", ""
-if len(vin_input.strip()) == 17:
-    with st.spinner("Decoding VIN..."):
-        decoded_year, decoded_make, decoded_model, decoded_trim = decode_vin(vin_input.strip())
-        if decoded_year:
-            st.success(f"Decoded: {decoded_year} {decoded_make} {decoded_model} {decoded_trim}")
-        else:
-            st.warning("Could not decode VIN. Please check the digits or fill out the details manually.")
-
-with st.form("vehicle_form"):
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        year = st.text_input("Year", value=decoded_year if decoded_year else "2005")
-    with col2:
-        make = st.text_input("Make", value=decoded_make if decoded_make else "Acura")
-    with col3:
-        model = st.text_input("Model", value=decoded_model if decoded_model else "TL")
-    with col4:
-        trim = st.text_input("Trim / Engine (Optional)", value=decoded_trim if decoded_trim else "3.2L Base")
+        if prices:
+            # Strip outliers (highest/lowest 10%)
+            prices.sort()
+            trimmed = prices[1:-1] if len(prices) > 3 else prices
+            avg_price = sum(trimmed) / len(trimmed)
+            return round(avg_price, 2)
+    except Exception as e:
+        st.sidebar.warning(f"eBay Live API Notice: Using market estimate ({e})")
     
-    submit = st.form_submit_button("Find High-Value Parts")
+    return None
 
-if submit:
-    if not gemini_api_key:
-        st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
-    else:
-        try:
-            client = genai.Client(api_key=gemini_api_key)
-            
-            with st.spinner("Analyzing platform architecture and identifying high-margin parts..."):
-                prompt = f"""
-                You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
-                When given a vehicle ({year} {make} {model} {trim}), identify the top 20 candidate high-value OEM parts.
+# ------------------------------------------------------------------------------
+# 4. GEMINI PART IDENTIFICATION ENGINE
+# ------------------------------------------------------------------------------
+def evaluate_vehicle_parts(year, make, model, trim, yard_key):
+    """Uses Gemini to identify high-value flip targets and cross-reference with yard prices."""
+    model_engine = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = f"""
+    You are an expert junkyard auto parts reseller on eBay.
+    Analyze the following vehicle: {year} {make} {model} {trim}.
+    
+    List top 8 high-demand, high-profit electronic or fast-pull components on this specific vehicle.
+    For each part, provide a structured JSON list containing:
+    1. part_name: Common name of the part.
+    2. category_key: One of ['apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav']
+    3. est_avg_sold: Estimated eBay average sold price in USD ($).
+    4. difficulty: Pull difficulty e.g. "Easy (5 mins)", "Moderate (15 mins)".
+    5. tools_needed: Tools required e.g. "10mm socket, trim tool".
+    6. notes: Location in car and key failure modes/reasons for demand.
 
-                Prioritize:
-                1. High Profit Density: Lightweight/small relative to sell price (low shipping).
-                2. Known High-Failure / High-Demand Parts: Modules (ECM, TCM, BCM), Climate Control Knobs, OEM Amps, Window Switches, Tail Lights, Cup Holders, Overhead Consoles, Instrument Clusters, Door Lock Actuators, Mass Air Flow Sensors, Throttle Bodies.
-                3. Ease of Removal: Hand tool removal vs. heavy teardown.
+    Return ONLY a valid JSON array of objects. No markdown formatting outside of ```json ``` block.
+    """
+    
+    response = model_engine.generate_content(prompt)
+    
+    try:
+        cleaned_text = re.sub(r'```json\s*|\s*```', '', response.text).strip()
+        parts_data = json.loads(cleaned_text)
+    except Exception as e:
+        st.error(f"Error parsing Gemini response: {e}")
+        return []
 
-                Return strictly raw JSON format matching this array schema without markdown wrappers:
-                [
-                  {{
-                    "part_name": "Part Name",
-                    "est_yard_cost": 15,
-                    "est_ebay_price": 120,
-                    "est_net_profit": 85,
-                    "difficulty": "Easy (5 mins)",
-                    "tools_needed": "10mm socket, trim tool",
-                    "notes": "Common failure point; high resale demand."
-                  }}
-                ]
-                """
+    # Process and enrich with local yard prices and eBay fees
+    results = []
+    for part in parts_data:
+        category = part.get("category_key", "default")
+        yard_cost, base_yard_price = calculate_local_yard_cost(category, yard_key)
+        
+        # Check live eBay price if available, otherwise use Gemini estimate
+        live_ebay = fetch_ebay_sold_data(f"{year} {make} {model} {part['part_name']}")
+        avg_sold = live_ebay if live_ebay else part.get("est_avg_sold", 100.0)
+        
+        # Standard eBay Profit Formula:
+        # Net Profit = Avg Sold - Yard Cost - eBay Fee (13.25% + $0.30) - Est Shipping ($12.00)
+        ebay_fee = (avg_sold * 0.1325) + 0.30
+        est_shipping = 12.00
+        net_profit = round(avg_sold - yard_cost - ebay_fee - est_shipping, 2)
 
-                response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=prompt
-                )
+        results.append({
+            "part_name": part.get("part_name"),
+            "yard_cost": yard_cost,
+            "avg_sold": avg_sold,
+            "net_profit": net_profit,
+            "difficulty": part.get("difficulty"),
+            "tools_needed": part.get("tools_needed"),
+            "notes": part.get("notes")
+        })
 
-                # Parse JSON output
-                raw_text = response.text.strip()
-                if raw_text.startswith("```"):
-                    raw_text = raw_text.split("```")[1]
-                    if raw_text.startswith("json"):
-                        raw_text = raw_text[4:]
-                
-                parts_data = json.loads(raw_text.strip())
+    return results
 
-                # Enrich each part with the (mocked) eBay market data
-                for item in parts_data:
-                    ebay_stats = get_mock_ebay_pricing(item["part_name"], year, make, model)
-                    item["Market Demand"] = ebay_stats["sell_through_rate"]
-                    item["Avg Sold Price ($)"] = f"${item['est_ebay_price']}"
-                    item["Yard Cost ($)"] = f"${item['est_yard_cost']}"
-                    item["Net Profit ($)"] = f"${item['est_net_profit']}"
+# ------------------------------------------------------------------------------
+# 5. STREAMLIT FRONTEND USER INTERFACE
+# ------------------------------------------------------------------------------
+st.title("🚗 Junkyard Flip Calculator")
+st.caption("Configured for Southeast Michigan Self-Serve Yards")
 
-                st.subheader(f"Top 20 Parts to Pull: {year} {make} {model}")
-                
-                df = pd.DataFrame(parts_data)
-                display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Net Profit ($)", "difficulty", "tools_needed", "notes"]
-                st.dataframe(df[display_cols], use_container_width=True)
+st.sidebar.header("Yard & Vehicle Options")
 
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
+selected_yard = st.sidebar.selectbox(
+    "Select Local Yard:",
+    options=["pontiac", "sterling_heights"],
+    format_func=lambda x: YARD_PRICING[x]["name"]
+)
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    year = st.text_input("Year", value="2015")
+with col2:
+    make = st.text_input("Make", value="Ford")
+with col3:
+    model = st.text_input("Model", value="Explorer")
+with col4:
+    trim = st.text_input("Trim (Optional)", value="Limited")
+
+if st.button("Evaluate Vehicle Parts", type="primary"):
+    with st.spinner(f"Analyzing {year} {make} {model} against {YARD_PRICING[selected_yard]['name']} pricing..."):
+        results = evaluate_vehicle_parts(year, make, model, trim, selected_yard)
+        
+        if results:
+            st.subheader(f"Recommended Pulls for {year} {make} {model}")
+            st.caption(f"Yard Costs based on exact rates at **{YARD_PRICING[selected_yard]['name']}** (Includes 6% MI Sales Tax).")
+
+            # Format data for display
+            display_table = []
+            for item in results:
+                display_table.append({
+                    "Part Name": item["part_name"],
+                    "Yard Cost ($)": f"${item['yard_cost']:.2f}",
+                    "Avg Sold Price ($)": f"${item['avg_sold']:.2f}",
+                    "Net Profit ($)": f"${item['net_profit']:.2f}",
+                    "Difficulty": item["difficulty"],
+                    "Tools Needed": item["tools_needed"],
+                    "Notes": item["notes"]
+                })
+
+            st.dataframe(display_table, use_container_width=True)

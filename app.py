@@ -9,9 +9,16 @@ st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
 st.write("Enter a vehicle to see the top high-profit, easy-to-pull parts for eBay flipping.")
 
-# Sidebar for API Configuration
+# --- AUTOMATIC API KEY LOGIC ---
+# Reads GEMINI_API_KEY directly from Streamlit Secrets
+secret_key = st.secrets.get("GEMINI_API_KEY", "")
+
 st.sidebar.header("Settings")
-gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
+if secret_key:
+    gemini_api_key = secret_key
+    st.sidebar.success("✅ Gemini API Key loaded automatically!")
+else:
+    gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
 
 # --- MOCK EBAY DATA ENGINE ---
 def get_mock_ebay_pricing(part_name, year, make, model):
@@ -39,7 +46,7 @@ with st.form("vehicle_form"):
 
 if submit:
     if not gemini_api_key:
-        st.error("Please enter your Google Gemini API Key in the sidebar to run the analysis.")
+        st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
             client = genai.Client(api_key=gemini_api_key)

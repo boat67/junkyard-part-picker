@@ -124,7 +124,11 @@ if submit:
         st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
-            client = genai.Client(api_key=gemini_api_key)
+            # Set explicit API options to prevent hanging connection calls
+            client = genai.Client(
+                api_key=gemini_api_key,
+                http_options=types.HttpOptions(timeout=15.0)
+            )
             
             with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
                 prompt = f"""
@@ -145,17 +149,21 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Using the dynamic alias so Google auto-routes to your active tier
+                # Standard model string supported across all API key tiers
                 response = client.models.generate_content(
-                    model="gemini-flash-latest",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json"
-                    )
+                    model="gemini-1.5-flash",
+                    contents=prompt
                 )
 
                 raw_text = response.text.strip()
-                parts_data = json.loads(raw_text)
+                
+                # Cleanup potential code block wrappers
+                if "```" in raw_text:
+                    raw_text = raw_text.split("```")[1]
+                    if raw_text.startswith("json"):
+                        raw_text = raw_text[4:]
+                
+                parts_data = json.loads(raw_text.strip())
 
                 for item in parts_data:
                     cat = item.get("category_key", "default")
@@ -178,4 +186,4 @@ if submit:
                 st.dataframe(df[display_cols], use_container_width=True)
 
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"API Error: {e}")

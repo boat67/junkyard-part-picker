@@ -85,8 +85,8 @@ with tab1:
                     ]
                     """
 
-                    # Using the standard stable flash endpoint
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_api_key}"
+                    # Updated to gemini-3.5-flash
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{
                             "parts": [
@@ -191,8 +191,8 @@ with tab2:
                     ]
                     """
 
-                    # Using the standard stable flash endpoint
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_api_key}"
+                    # Updated to gemini-3.5-flash
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {

@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.parse
 import requests
 import streamlit as st
 import pandas as pd
@@ -111,15 +112,34 @@ if submit:
                             
                     parts_data = json.loads(raw_text.strip())
 
-                    for item in parts_data:
-                        avg_sold = float(item.get("est_ebay_price", 75))
-                        item["Est. eBay Price"] = f"${avg_sold:.2f}"
-
                     st.subheader(f"Top 20 Parts to Pull for {year} {make} {model}")
+                    st.caption("Click the quick links below each part to instantly check local yard pricing or eBay sold comps without retyping.")
 
-                    df = pd.DataFrame(parts_data)
-                    display_cols = ["part_name", "Est. eBay Price", "difficulty", "tools_needed", "notes"]
-                    st.dataframe(df[display_cols], use_container_width=True)
+                    for i, item in enumerate(parts_data, 1):
+                        p_name = item.get("part_name", "Part")
+                        est_price = float(item.get("est_ebay_price", 75))
+                        diff = item.get("difficulty", "N/A")
+                        tools = item.get("tools_needed", "N/A")
+                        notes = item.get("notes", "N/A")
+
+                        # Generate pre-filled search URLs
+                        query_encoded = urllib.parse.quote(f"{year} {make} {model} {p_name}")
+                        ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={query_encoded}&LH_Sold=1&LH_Complete=1"
+                        upull_url = "https://www.u-pullandsave.com/price-list"
+
+                        with st.container(border=True):
+                            c1, c2, c3 = st.columns([3, 2, 2])
+                            with c1:
+                                st.markdown(f"**{i}. {p_name}**")
+                                st.markdown(f"*Notes:* {notes}")
+                            with c2:
+                                st.markdown(f"💰 **Est. eBay:** ${est_price:.2f}")
+                                st.markdown(f"🔧 **Tools:** {tools}")
+                                st.markdown(f"⏱️ **Difficulty:** {diff}")
+                            with c3:
+                                st.markdown("**Quick Lookup:**")
+                                st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
+                                st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
 
         except Exception as e:
             st.error(f"API Error: {e}")

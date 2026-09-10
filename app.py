@@ -61,7 +61,6 @@ with tab1:
                 st.error("Please enter your Google Gemini API Key in the sidebar.")
             else:
                 with st.spinner("Analyzing vehicles in the photo..."):
-                    # Convert image for Gemini API payload
                     import io
                     buffered = io.BytesIO()
                     image.save(buffered, format="JPEG")
@@ -86,7 +85,8 @@ with tab1:
                     ]
                     """
 
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
+                    # Using the standard stable flash endpoint
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{
                             "parts": [
@@ -161,7 +161,7 @@ with tab2:
         with col1:
             year = st.text_input("Year", value=decoded_year if decoded_year else "2016")
         with col2:
-            make = st.text_input("Make", value=decoded_make if decoded_make else "Ford")
+            make = st.text_input("Make", value=decoded_make if decoded_make else "FORD")
         with col3:
             model = st.text_input("Model", value=decoded_model if decoded_model else "Fusion")
         with col4:
@@ -191,7 +191,8 @@ with tab2:
                     ]
                     """
 
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
+                    # Using the standard stable flash endpoint
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_api_key}"
                     payload = {
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {

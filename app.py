@@ -141,8 +141,8 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Direct REST API call bypassing SDK overhead and timeouts
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_api_key}"
+                # Using stable gemini-3.5-flash endpoint
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {

@@ -3,8 +3,6 @@ import json
 import requests
 import streamlit as st
 import pandas as pd
-from google import genai
-from google.genai import types
 
 # Page Config
 st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
@@ -124,11 +122,6 @@ if submit:
         st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
-            client = genai.Client(
-                api_key=gemini_api_key,
-                http_options=types.HttpOptions(timeout=60.0)
-            )
-            
             with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
                 prompt = f"""
                 You are an expert auto parts liquidator specializing in self-serve junkyard flipping on eBay.
@@ -148,37 +141,49 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                # Using current active generation model
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json"
-                    )
-                )
-
-                raw_text = response.text.strip()
-                parts_data = json.loads(raw_text)
-
-                for item in parts_data:
-                    cat = item.get("category_key", "default")
-                    yard_cost = calculate_local_yard_cost(cat, selected_yard)
-                    avg_sold = float(item.get("est_ebay_price", 75))
+                # Direct REST API call bypassing SDK overhead and timeouts
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_api_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "responseMimeType": "application/json"
+                    }
+                }
+                
+                response = requests.post(url, json=payload, timeout=30)
+                
+                if response.status_code != 200:
+                    st.error(f"API Error ({response.status_code}): {response.text}")
+                else:
+                    res_json = response.json()
+                    raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
                     
-                    ebay_fee = (avg_sold * 0.1325) + 0.30
-                    est_shipping = 12.00
-                    net_profit = round(avg_sold - yard_cost - ebay_fee - est_shipping, 2)
+                    if "```" in raw_text:
+                        raw_text = raw_text.split("```")[1]
+                        if raw_text.startswith("json"):
+                            raw_text = raw_text[4:]
+                            
+                    parts_data = json.loads(raw_text.strip())
 
-                    item["Yard Cost ($)"] = f"${yard_cost:.2f}"
-                    item["Avg Sold Price ($)"] = f"${avg_sold:.2f}"
-                    item["Est. Net Profit ($)"] = f"${net_profit:.2f}"
+                    for item in parts_data:
+                        cat = item.get("category_key", "default")
+                        yard_cost = calculate_local_yard_cost(cat, selected_yard)
+                        avg_sold = float(item.get("est_ebay_price", 75))
+                        
+                        ebay_fee = (avg_sold * 0.1325) + 0.30
+                        est_shipping = 12.00
+                        net_profit = round(avg_sold - yard_cost - ebay_fee - est_shipping, 2)
 
-                st.subheader(f"Top Pulls for {year} {make} {model}")
-                st.caption(f"Yard costs based on exact board rates at **{YARD_PRICING[selected_yard]['name']}** (includes 6% MI Sales Tax).")
+                        item["Yard Cost ($)"] = f"${yard_cost:.2f}"
+                        item["Avg Sold Price ($)"] = f"${avg_sold:.2f}"
+                        item["Est. Net Profit ($)"] = f"${net_profit:.2f}"
 
-                df = pd.DataFrame(parts_data)
-                display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Est. Net Profit ($)", "difficulty", "tools_needed", "notes"]
-                st.dataframe(df[display_cols], use_container_width=True)
+                    st.subheader(f"Top Pulls for {year} {make} {model}")
+                    st.caption(f"Yard costs based on exact board rates at **{YARD_PRICING[selected_yard]['name']}** (includes 6% MI Sales Tax).")
+
+                    df = pd.DataFrame(parts_data)
+                    display_cols = ["part_name", "Yard Cost ($)", "Avg Sold Price ($)", "Est. Net Profit ($)", "difficulty", "tools_needed", "notes"]
+                    st.dataframe(df[display_cols], use_container_width=True)
 
         except Exception as e:
             st.error(f"API Error: {e}")

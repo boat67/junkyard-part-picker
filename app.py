@@ -3,7 +3,8 @@ import json
 import requests
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # Page Config
 st.set_page_config(page_title="Junkyard Flip Assistant", layout="wide")
@@ -123,13 +124,9 @@ if submit:
         st.error("Please enter your Google Gemini API Key in the sidebar or set up Streamlit Secrets to run the analysis.")
     else:
         try:
-            # Configure standard SDK
-            genai.configure(api_key=gemini_api_key)
-            
-            # Enforce JSON generation
-            model_instance = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                generation_config={"response_mime_type": "application/json"}
+            client = genai.Client(
+                api_key=gemini_api_key,
+                http_options=types.HttpOptions(timeout=60.0)
             )
             
             with st.spinner(f"Analyzing {year} {make} {model} for {YARD_PRICING[selected_yard]['name']}..."):
@@ -151,8 +148,17 @@ if submit:
                 Valid category_keys are: 'apim', 'blind_spot', 'amp', 'bcm', 'pcm', 'tail_light', 'master_switch', 'hvac_panel', 'cluster', 'abs_module', 'radio_nav', 'default'.
                 """
 
-                response = model_instance.generate_content(prompt)
-                parts_data = json.loads(response.text.strip())
+                # Using current active generation model
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+
+                raw_text = response.text.strip()
+                parts_data = json.loads(raw_text)
 
                 for item in parts_data:
                     cat = item.get("category_key", "default")

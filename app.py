@@ -79,12 +79,15 @@ def get_ebay_token(app_id, cert_id):
     return None
 
 def search_ebay_live(query, app_id, cert_id):
-    """Queries eBay's Browse API for active market items matching the part query."""
+    """Queries eBay's Browse API for active market items matching the part query with cleaned keywords."""
     token = get_ebay_token(app_id, cert_id)
     if not token:
         return []
     
-    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={urllib.parse.quote(query)}&limit=3"
+    # Trim and simplify query to ensure the API returns valid matches
+    clean_query = " ".join(query.split()[:5])
+    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={urllib.parse.quote(clean_query)}&limit=3"
+    
     headers = {
         "Authorization": f"Bearer {token}",
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
@@ -171,7 +174,8 @@ with tab1:
                     prompt = """
                     You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles. 
                     Identify each distinct vehicle visible. For each vehicle, list its top 5 highest-margin parts to flip.
-                    Prefer small-to-medium parts that are cheap to ship, but include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins and are worth pulling for shipping or local cash sale. 
+                    Prefer small-to-medium parts that are cheap to ship, but include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins. 
+                    IMPORTANT: Provide realistic market resale price estimates (actual transaction averages, not inflated asking prices).
                     Include a brief note specifying if it's best for 'Shipping' or 'Local Pickup Only'.
 
                     Return strictly raw JSON format matching this array schema:
@@ -179,7 +183,7 @@ with tab1:
                       {
                         "vehicle_name": "2007-2013 GMC Sierra",
                         "part_name": "OEM Front Grille Assembly",
-                        "est_ebay_price": 150,
+                        "est_ebay_price": 120,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, clips tool",
                         "notes": "Large item, highly sought after. Best for Local Pickup or careful box shipping."
@@ -290,14 +294,15 @@ with tab2:
                 with st.spinner(f"Analyzing {year} {make} {model} for high-margin targets..."):
                     prompt = f"""
                     You are an expert auto parts liquidator specializing in self-serve junkyard flipping.
-                    When given a vehicle ({year} {make} {model} {trim}), identify 15 top candidate parts balancing ease of shipping with high-value larger items (like grilles, mirrors, assemblies) if the profit margin makes them worth pulling.
+                    When given a vehicle ({year} {make} {model} {trim}), identify 15 top candidate parts balancing ease of shipping with high-value larger items.
+                    IMPORTANT: Provide realistic market resale price averages based on actual completed sale values, not inflated asking prices.
                     Include a brief note on whether the item is great for shipping or better for local cash sale.
 
                     Return strictly raw JSON format matching this array schema:
                     [
                       {{
                         "part_name": "Part Name",
-                        "est_ebay_price": 110,
+                        "est_ebay_price": 45,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, trim tool",
                         "notes": "High demand, great margin. Good for shipping or local sale."
@@ -330,11 +335,11 @@ with tab2:
                         parts_data = json.loads(raw_text.strip())
 
                         st.subheader(f"Top High-Margin Parts to Pull for {year} {make} {model}")
-                        st.caption("Includes high-value shippable items and profitable larger components (like grilles or assemblies).")
+                        st.caption("Includes high-value shippable items and profitable larger components.")
 
                         for i, item in enumerate(parts_data, 1):
                             p_name = item.get("part_name", "Part")
-                            est_price = float(item.get("est_ebay_price", 75))
+                            est_price = float(item.get("est_ebay_price", 50))
                             diff = item.get("difficulty", "N/A")
                             tools = item.get("tools_needed", "N/A")
                             notes = item.get("notes", "N/A")

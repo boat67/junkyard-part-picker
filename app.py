@@ -79,20 +79,23 @@ def get_ebay_token(app_id, cert_id):
     return None
 
 def search_ebay_live(query, app_id, cert_id):
-    """Queries eBay's Browse API with cleaned keywords and basic error handling."""
+    """Queries eBay's Browse API with graceful fallback if keys are missing or invalid."""
+    fallback_url = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}&LH_Complete=1&LH_Sold=1"
+    
+    if not app_id or not cert_id:
+        return [{"title": "💡 Tip: Enter eBay API keys in sidebar for live API data (Click to search eBay Sold Comps)", "price": "", "url": fallback_url}]
+
     token = get_ebay_token(app_id, cert_id)
     if not token:
-        return [{"title": "API Auth Failed (Check Keys)", "price": "$0.00", "url": "#"}]
+        return [{"title": "⚠️ eBay API Auth Failed. Click here to view direct Sold Comps", "price": "", "url": fallback_url}]
     
-    # Simplify query to just core terms to ensure API matches items
-    words = query.split()
-    clean_query = " ".join(words[:4]) if len(words) > 4 else query
-    
+    clean_query = " ".join(query.split()[:5])
     url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={urllib.parse.quote(clean_query)}&limit=3"
     
     headers = {
         "Authorization": f"Bearer {token}",
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "Accept": "application/json"
     }
     try:
         response = requests.get(url, headers=headers, timeout=10)
@@ -100,12 +103,11 @@ def search_ebay_live(query, app_id, cert_id):
             data = response.json()
             items = data.get("itemSummaries", [])
             if not items:
-                fallback_url = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}"
-                return [{"title": "No direct API matches. Click to search manually.", "price": "", "url": fallback_url}]
+                return [{"title": "No direct API items found. Click to search eBay Sold Comps", "price": "", "url": fallback_url}]
             
             results = []
             for item in items:
-                title = item.get("title")
+                title = item.get("title", "Unknown Item")
                 price_info = item.get("price", {})
                 price = price_info.get("value", "0.00")
                 currency = price_info.get("currency", "USD")
@@ -113,9 +115,9 @@ def search_ebay_live(query, app_id, cert_id):
                 results.append({"title": title, "price": f"${price} {currency}", "url": item_url})
             return results
         else:
-            return [{"title": f"API Error Code: {response.status_code}", "price": "", "url": "#"}]
+            return [{"title": f"API Error ({response.status_code}). Click to search eBay Sold Comps", "price": "", "url": fallback_url}]
     except Exception as e:
-        return [{"title": f"Connection Error: {str(e)}", "price": "", "url": "#"}]
+        return [{"title": "Connection Error. Click to search eBay Sold Comps", "price": "", "url": fallback_url}]
 
 # --- FREE NHTSA VIN DECODER ENGINE ---
 def decode_vin(vin):
@@ -260,13 +262,11 @@ with tab1:
                                         st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
                                         st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
                                     
-                                    # Fetch live eBay API results if credentials are provided
-                                    if ebay_app_id and ebay_cert_id:
-                                        with st.expander("⚡ Live eBay Market Comps"):
-                                            live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
-                                            if live_items:
-                                                for li in live_items:
-                                                    st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
+                                    with st.expander("⚡ Live eBay Market Comps"):
+                                        live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
+                                        if live_items:
+                                            for li in live_items:
+                                                st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
                     except Exception as e:
                         st.error(f"Processing Error: {e}")
 
@@ -375,13 +375,11 @@ with tab2:
                                     st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
                                     st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
                                 
-                                # Fetch live eBay API results if credentials are provided
-                                if ebay_app_id and ebay_cert_id:
-                                    with st.expander("⚡ Live eBay Market Comps"):
-                                        live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
-                                        if live_items:
-                                            for li in live_items:
-                                                st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
+                                with st.expander("⚡ Live eBay Market Comps"):
+                                    live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
+                                    if live_items:
+                                        for li in live_items:
+                                            st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
 
             except Exception as e:
                 st.error(f"API Error: {e}")

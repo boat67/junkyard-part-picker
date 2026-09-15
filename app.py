@@ -185,7 +185,7 @@ with tab1:
                     You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles. 
                     Identify each distinct vehicle visible. For each vehicle, list its top 5 highest-margin parts to flip.
                     Prefer small-to-medium parts that are cheap to ship, but include larger items if they carry exceptionally high profit margins. 
-                    IMPORTANT: Provide realistic market resale price estimates based on typical completed sale values (e.g., switches usually sell for $25-$40, modules for $40-$70).
+                    IMPORTANT: Provide realistic, conservative market resale prices based strictly on completed sold listings (e.g., window master switches usually sell for $22-$35, small switches/relays for $15-$25, modules for $35-$55). Do not inflate prices.
                     Include a brief note specifying if it's best for 'Shipping' or 'Local Pickup Only'.
 
                     Return strictly raw JSON format matching this array schema:
@@ -193,7 +193,7 @@ with tab1:
                       {
                         "vehicle_name": "2007-2013 GMC Sierra",
                         "part_name": "OEM Front Grille Assembly",
-                        "est_ebay_price": 90,
+                        "est_ebay_price": 75,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, clips tool",
                         "notes": "Large item, highly sought after. Best for Local Pickup or careful box shipping."
@@ -237,7 +237,7 @@ with tab1:
                             for item in scanned_data:
                                 v_name = item.get("vehicle_name", "Vehicle")
                                 p_name = item.get("part_name", "Part")
-                                est_price = float(item.get("est_ebay_price", 40))
+                                est_price = float(item.get("est_ebay_price", 35))
                                 diff = item.get("difficulty", "N/A")
                                 tools = item.get("tools_needed", "N/A")
                                 notes = item.get("notes", "N/A")
@@ -304,14 +304,14 @@ with tab2:
                     prompt = f"""
                     You are an expert auto parts liquidator specializing in self-serve junkyard flipping.
                     When given a vehicle ({year} {make} {model} {trim}), identify 15 top candidate parts balancing ease of shipping with high-value larger items.
-                    IMPORTANT: Provide realistic market resale price averages based on actual completed sale values (e.g. switches around $30-$40, small modules around $40-$60). Avoid high or inflated estimates.
+                    IMPORTANT: Provide realistic, conservative market resale prices based strictly on completed sold listings (e.g., window master switches usually sell for $22-$35, small switches/relays for $15-$25, modules for $35-$55). Do not inflate prices.
                     Include a brief note on whether the item is great for shipping or better for local cash sale.
 
                     Return strictly raw JSON format matching this array schema:
                     [
                       {{
                         "part_name": "Part Name",
-                        "est_ebay_price": 35,
+                        "est_ebay_price": 28,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, trim tool",
                         "notes": "High demand, great margin. Good for shipping or local sale."
@@ -351,7 +351,7 @@ with tab2:
 
                         for i, item in enumerate(parts_data, 1):
                             p_name = item.get("part_name", "Part")
-                            est_price = float(item.get("est_ebay_price", 40))
+                            est_price = float(item.get("est_ebay_price", 30))
                             diff = item.get("difficulty", "N/A")
                             tools = item.get("tools_needed", "N/A")
                             notes = item.get("notes", "N/A")

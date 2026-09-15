@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import base64
 import urllib.parse
 import requests
 import streamlit as st
@@ -11,10 +12,12 @@ from streamlit_paste_button import paste_image_button
 # Page Config
 st.set_page_config(page_title="Junkyard Part Picker AI", layout="wide")
 st.title("🚗 Junkyard Part Picker AI")
-st.write("Upload or paste a yard arrival photo or enter a vehicle/VIN to identify high-profit parts for eBay shipping or local cash flips.")
+st.write("Upload or paste a yard arrival photo or enter a vehicle/VIN to identify high-profit parts with live eBay market data.")
 
 # --- AUTOMATIC API KEY LOGIC ---
 secret_key = st.secrets.get("GEMINI_API_KEY", "")
+secret_ebay_app = st.secrets.get("EBAY_APP_ID", "")
+secret_ebay_cert = st.secrets.get("EBAY_CERT_ID", "")
 
 st.sidebar.header("Settings")
 if secret_key:
@@ -22,6 +25,16 @@ if secret_key:
     st.sidebar.success("✅ Gemini API Key loaded automatically!")
 else:
     gemini_api_key = st.sidebar.text_input("Google Gemini API Key", type="password")
+
+st.sidebar.markdown("---")
+st.sidebar.header("eBay API Credentials")
+if secret_ebay_app and secret_ebay_cert:
+    ebay_app_id = secret_ebay_app
+    ebay_cert_id = secret_ebay_cert
+    st.sidebar.success("✅ eBay Keys loaded automatically!")
+else:
+    ebay_app_id = st.sidebar.text_input("eBay App ID (Client ID)", type="password")
+    ebay_cert_id = st.sidebar.text_input("eBay Cert ID (Client Secret)", type="password")
 
 # --- ROBUST GEMINI API CALLER WITH AUTO-RETRIES ---
 def call_gemini_with_retry(url, payload, max_retries=3):
@@ -41,6 +54,57 @@ def call_gemini_with_retry(url, payload, max_retries=3):
                 raise
             time.sleep(2)
     return None
+
+# --- EBAY API CLIENT FUNCTIONS ---
+@st.cache_data(ttl=7200)
+def get_ebay_token(app_id, cert_id):
+    """Generates an OAuth client credentials token from eBay."""
+    url = "https://api.ebay.com/identity/v1/oauth2/token"
+    credentials = f"{app_id}:{cert_id}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {encoded_credentials}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = {
+        "grant_type": "client_credentials",
+        "scope": "https://api.ebay.com/oauth/api_scope"
+    }
+    try:
+        response = requests.post(url, headers=headers, data=data, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+    except Exception:
+        pass
+    return None
+
+def search_ebay_live(query, app_id, cert_id):
+    """Queries eBay's Browse API for active market items matching the part query."""
+    token = get_ebay_token(app_id, cert_id)
+    if not token:
+        return []
+    
+    url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={urllib.parse.quote(query)}&limit=3"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            items = response.json().get("itemSummaries", [])
+            results = []
+            for item in items:
+                title = item.get("title")
+                price_info = item.get("price", {})
+                price = price_info.get("value")
+                currency = price_info.get("currency", "USD")
+                item_url = item.get("itemWebUrl")
+                results.append({"title": title, "price": f"${price} {currency}", "url": item_url})
+            return results
+    except Exception:
+        pass
+    return []
 
 # --- FREE NHTSA VIN DECODER ENGINE ---
 def decode_vin(vin):
@@ -102,13 +166,12 @@ with tab1:
                     if image.mode in ("RGBA", "P"):
                         image = image.convert("RGB")
                     image.save(buffered, format="JPEG")
-                    import base64
                     img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
                     prompt = """
                     You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles. 
                     Identify each distinct vehicle visible. For each vehicle, list its top 5 highest-margin parts to flip.
-                    Prefer small-to-medium parts that are cheap to ship, but *do* include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins and are worth pulling for shipping or local cash sale. 
+                    Prefer small-to-medium parts that are cheap to ship, but include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins and are worth pulling for shipping or local cash sale. 
                     Include a brief note specifying if it's best for 'Shipping' or 'Local Pickup Only'.
 
                     Return strictly raw JSON format matching this array schema:
@@ -162,7 +225,8 @@ with tab1:
                                 tools = item.get("tools_needed", "N/A")
                                 notes = item.get("notes", "N/A")
 
-                                query_encoded = urllib.parse.quote(f"{v_name} {p_name}")
+                                query_str = f"{v_name} {p_name}"
+                                query_encoded = urllib.parse.quote(query_str)
                                 ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={query_encoded}&LH_Sold=1&LH_Complete=1"
                                 upull_url = "https://www.u-pullandsave.com/price-list"
 
@@ -180,6 +244,16 @@ with tab1:
                                         st.markdown("**Quick Lookup:**")
                                         st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
                                         st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
+                                    
+                                    # Fetch live eBay API results if credentials are provided
+                                    if ebay_app_id and ebay_cert_id:
+                                        with st.expander("⚡ Live eBay Market Comps"):
+                                            live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
+                                            if live_items:
+                                                for li in live_items:
+                                                    st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
+                                            else:
+                                                st.info("No active live matches found via API.")
                     except Exception as e:
                         st.error(f"Processing Error: {e}")
 
@@ -265,7 +339,8 @@ with tab2:
                             tools = item.get("tools_needed", "N/A")
                             notes = item.get("notes", "N/A")
 
-                            query_encoded = urllib.parse.quote(f"{year} {make} {model} {p_name}")
+                            query_str = f"{year} {make} {model} {p_name}"
+                            query_encoded = urllib.parse.quote(query_str)
                             ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={query_encoded}&LH_Sold=1&LH_Complete=1"
                             upull_url = "https://www.u-pullandsave.com/price-list"
 
@@ -282,6 +357,16 @@ with tab2:
                                     st.markdown("**Quick Lookup:**")
                                     st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
                                     st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
+                                
+                                # Fetch live eBay API results if credentials are provided
+                                if ebay_app_id and ebay_cert_id:
+                                    with st.expander("⚡ Live eBay Market Comps"):
+                                        live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
+                                        if live_items:
+                                            for li in live_items:
+                                                st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
+                                        else:
+                                            st.info("No active live matches found via API.")
 
             except Exception as e:
                 st.error(f"API Error: {e}")

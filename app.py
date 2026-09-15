@@ -79,13 +79,15 @@ def get_ebay_token(app_id, cert_id):
     return None
 
 def search_ebay_live(query, app_id, cert_id):
-    """Queries eBay's Browse API for active market items matching the part query with cleaned keywords."""
+    """Queries eBay's Browse API with cleaned keywords and basic error handling."""
     token = get_ebay_token(app_id, cert_id)
     if not token:
-        return []
+        return [{"title": "API Auth Failed (Check Keys)", "price": "$0.00", "url": "#"}]
     
-    # Trim and simplify query to ensure the API returns valid matches
-    clean_query = " ".join(query.split()[:5])
+    # Simplify query to just core terms to ensure API matches items
+    words = query.split()
+    clean_query = " ".join(words[:4]) if len(words) > 4 else query
+    
     url = f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={urllib.parse.quote(clean_query)}&limit=3"
     
     headers = {
@@ -95,19 +97,25 @@ def search_ebay_live(query, app_id, cert_id):
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            items = response.json().get("itemSummaries", [])
+            data = response.json()
+            items = data.get("itemSummaries", [])
+            if not items:
+                fallback_url = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}"
+                return [{"title": f"No direct API matches. Click to search manually.", "price": "", "url": fallback_url}]
+            
             results = []
             for item in items:
                 title = item.get("title")
                 price_info = item.get("price", {})
-                price = price_info.get("value")
+                price = price_info.get("value", "0.00")
                 currency = price_info.get("currency", "USD")
-                item_url = item.get("itemWebUrl")
+                item_url = item.get("itemWebUrl", "#")
                 results.append({"title": title, "price": f"${price} {currency}", "url": item_url})
             return results
-    except Exception:
-        pass
-    return []
+        else:
+            return [{"title": f"API Error Code: {response.status_code}", "price": "", "url": "#"}]
+    except Exception as e:
+        return [{"title": f"Connection Error: {str(e)}", "price": "", "url": "#"}]
 
 # --- FREE NHTSA VIN DECODER ENGINE ---
 def decode_vin(vin):
@@ -174,8 +182,8 @@ with tab1:
                     prompt = """
                     You are an expert auto parts liquidator. Look at this yard arrival photo containing multiple vehicles. 
                     Identify each distinct vehicle visible. For each vehicle, list its top 5 highest-margin parts to flip.
-                    Prefer small-to-medium parts that are cheap to ship, but include larger items (like grilles, tail lights, or mirrors) if they carry exceptionally high profit margins. 
-                    IMPORTANT: Provide realistic market resale price estimates (actual transaction averages, not inflated asking prices).
+                    Prefer small-to-medium parts that are cheap to ship, but include larger items if they carry exceptionally high profit margins. 
+                    IMPORTANT: Provide realistic market resale price estimates based on typical completed sale values (e.g., switches usually sell for $25-$40, modules for $40-$70).
                     Include a brief note specifying if it's best for 'Shipping' or 'Local Pickup Only'.
 
                     Return strictly raw JSON format matching this array schema:
@@ -183,7 +191,7 @@ with tab1:
                       {
                         "vehicle_name": "2007-2013 GMC Sierra",
                         "part_name": "OEM Front Grille Assembly",
-                        "est_ebay_price": 120,
+                        "est_ebay_price": 90,
                         "difficulty": "Easy (5 mins)",
                         "tools_needed": "10mm socket, clips tool",
                         "notes": "Large item, highly sought after. Best for Local Pickup or careful box shipping."
@@ -214,164 +222,4 @@ with tab1:
                             raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
                             
                             if "```" in raw_text:
-                                raw_text = raw_text.split("```")[1]
-                                if raw_text.startswith("json"):
-                                    raw_text = raw_text[4:]
-                                    
-                            scanned_data = json.loads(raw_text.strip())
-
-                            st.subheader("Detected Vehicles & Top Part Targets")
-                            for item in scanned_data:
-                                v_name = item.get("vehicle_name", "Vehicle")
-                                p_name = item.get("part_name", "Part")
-                                est_price = float(item.get("est_ebay_price", 50))
-                                diff = item.get("difficulty", "N/A")
-                                tools = item.get("tools_needed", "N/A")
-                                notes = item.get("notes", "N/A")
-
-                                query_str = f"{v_name} {p_name}"
-                                query_encoded = urllib.parse.quote(query_str)
-                                ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={query_encoded}&LH_Sold=1&LH_Complete=1"
-                                upull_url = "https://www.u-pullandsave.com/price-list"
-
-                                with st.container(border=True):
-                                    st.markdown(f"### 🚗 {v_name}")
-                                    c1, c2, c3 = st.columns([3, 2, 2])
-                                    with c1:
-                                        st.markdown(f"**Part:** {p_name}")
-                                        st.markdown(f"*Notes:* {notes}")
-                                    with c2:
-                                        st.markdown(f"💰 **Est. eBay:** ${est_price:.2f}")
-                                        st.markdown(f"🔧 **Tools:** {tools}")
-                                        st.markdown(f"⏱️ **Difficulty:** {diff}")
-                                    with c3:
-                                        st.markdown("**Quick Lookup:**")
-                                        st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
-                                        st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
-                                    
-                                    # Fetch live eBay API results if credentials are provided
-                                    if ebay_app_id and ebay_cert_id:
-                                        with st.expander("⚡ Live eBay Market Comps"):
-                                            live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
-                                            if live_items:
-                                                for li in live_items:
-                                                    st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
-                                            else:
-                                                st.info("No active live matches found via API.")
-                    except Exception as e:
-                        st.error(f"Processing Error: {e}")
-
-# --- TAB 2: MANUAL / VIN LOOKUP ---
-with tab2:
-    st.subheader("Vehicle Lookup")
-    vin_input = st.text_input("Paste 17-Digit VIN (Optional)", value="", max_chars=17, key="vin_box")
-
-    decoded_year, decoded_make, decoded_model, decoded_trim = "", "", "", ""
-    if len(vin_input.strip()) == 17:
-        with st.spinner("Decoding VIN..."):
-            decoded_year, decoded_make, decoded_model, decoded_trim = decode_vin(vin_input.strip())
-            if decoded_year:
-                st.success(f"Decoded: {decoded_year} {decoded_make} {decoded_model} {decoded_trim}")
-
-    with st.form("vehicle_form"):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            year = st.text_input("Year", value=decoded_year if decoded_year else "2016")
-        with col2:
-            make = st.text_input("Make", value=decoded_make if decoded_make else "FORD")
-        with col3:
-            model = st.text_input("Model", value=decoded_model if decoded_model else "Fusion")
-        with col4:
-            trim = st.text_input("Trim / Engine", value=decoded_trim if decoded_trim else "SE")
-        
-        submit = st.form_submit_button("Find High-Profit Parts")
-
-    if submit:
-        if not gemini_api_key:
-            st.error("Please enter your Google Gemini API Key in the sidebar.")
-        else:
-            try:
-                with st.spinner(f"Analyzing {year} {make} {model} for high-margin targets..."):
-                    prompt = f"""
-                    You are an expert auto parts liquidator specializing in self-serve junkyard flipping.
-                    When given a vehicle ({year} {make} {model} {trim}), identify 15 top candidate parts balancing ease of shipping with high-value larger items.
-                    IMPORTANT: Provide realistic market resale price averages based on actual completed sale values, not inflated asking prices.
-                    Include a brief note on whether the item is great for shipping or better for local cash sale.
-
-                    Return strictly raw JSON format matching this array schema:
-                    [
-                      {{
-                        "part_name": "Part Name",
-                        "est_ebay_price": 45,
-                        "difficulty": "Easy (5 mins)",
-                        "tools_needed": "10mm socket, trim tool",
-                        "notes": "High demand, great margin. Good for shipping or local sale."
-                      }}
-                    ]
-                    """
-
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={gemini_api_key}"
-                    payload = {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "responseMimeType": "application/json"
-                        }
-                    }
-                    
-                    response = call_gemini_with_retry(url, payload)
-                    
-                    if response is None or response.status_code != 200:
-                        err_msg = response.text if response else "No response from server"
-                        st.error(f"API Error: {err_msg}")
-                    else:
-                        res_json = response.json()
-                        raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                        
-                        if "```" in raw_text:
-                            raw_text = raw_text.split("```")[1]
-                            if raw_text.startswith("json"):
-                                raw_text = raw_text[4:]
-                                
-                        parts_data = json.loads(raw_text.strip())
-
-                        st.subheader(f"Top High-Margin Parts to Pull for {year} {make} {model}")
-                        st.caption("Includes high-value shippable items and profitable larger components.")
-
-                        for i, item in enumerate(parts_data, 1):
-                            p_name = item.get("part_name", "Part")
-                            est_price = float(item.get("est_ebay_price", 50))
-                            diff = item.get("difficulty", "N/A")
-                            tools = item.get("tools_needed", "N/A")
-                            notes = item.get("notes", "N/A")
-
-                            query_str = f"{year} {make} {model} {p_name}"
-                            query_encoded = urllib.parse.quote(query_str)
-                            ebay_url = f"https://www.ebay.com/sch/i.html?_nkw={query_encoded}&LH_Sold=1&LH_Complete=1"
-                            upull_url = "https://www.u-pullandsave.com/price-list"
-
-                            with st.container(border=True):
-                                c1, c2, c3 = st.columns([3, 2, 2])
-                                with c1:
-                                    st.markdown(f"**{i}. {p_name}**")
-                                    st.markdown(f"*Notes:* {notes}")
-                                with c2:
-                                    st.markdown(f"💰 **Est. eBay:** ${est_price:.2f}")
-                                    st.markdown(f"🔧 **Tools:** {tools}")
-                                    st.markdown(f"⏱️ **Difficulty:** {diff}")
-                                with c3:
-                                    st.markdown("**Quick Lookup:**")
-                                    st.markdown(f"[🔍 Check U-Pull Price List]({upull_url})")
-                                    st.markdown(f"[📦 View eBay Sold Comps]({ebay_url})")
-                                
-                                # Fetch live eBay API results if credentials are provided
-                                if ebay_app_id and ebay_cert_id:
-                                    with st.expander("⚡ Live eBay Market Comps"):
-                                        live_items = search_ebay_live(query_str, ebay_app_id, ebay_cert_id)
-                                        if live_items:
-                                            for li in live_items:
-                                                st.markdown(f"- [{li['title']}]({li['url']}) — **{li['price']}**")
-                                        else:
-                                            st.info("No active live matches found via API.")
-
-            except Exception as e:
-                st.error(f"API Error: {e}")
+                                raw_text = raw_text.split("

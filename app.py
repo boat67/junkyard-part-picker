@@ -101,7 +101,7 @@ def search_ebay_live(query, app_id, cert_id):
             items = data.get("itemSummaries", [])
             if not items:
                 fallback_url = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}"
-                return [{"title": f"No direct API matches. Click to search manually.", "price": "", "url": fallback_url}]
+                return [{"title": "No direct API matches. Click to search manually.", "price": "", "url": fallback_url}]
             
             results = []
             for item in items:
@@ -222,4 +222,4 @@ with tab1:
                             raw_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
                             
                             if "```" in raw_text:
-                                raw_text = raw_text.split("
+                                parts_split = raw_text.split("
